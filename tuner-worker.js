@@ -12,9 +12,20 @@
 
 const N = 4096;
 let sr = 48000, ring = new Float32Array(N), filled = 0;
-let envRms = 0, attackLeft = 0, hist = [], floor = 0, gaps = 0, debug = false, rec = null;
+// Tuning constants (evaluated against real recordings; see README).
+const STAB = 5;          // frames that must agree before a reading is trusted (~83 ms)
+const SPREAD = 25;       // ...within this many cents
+const ATTACK_MS = 100;   // skip this long after a pluck starts
+const REFRACT_MS = 300;  // a pluck can't re-trigger for this long (its loudness keeps rising)
+const RISE = 1.002;      // room-floor rise per hop during a note's quiet gaps (doubles in ~6 s)
+const RISE_IDLE = 1.02;  // ...and between notes, so a steady hum becomes background in ~1-2 s
+const SUB_ABS = 0;       // >0 lets a clean 1/k period win outright; 0.1+ misreads low E an octave up
+const JUMP_HOLD = 15;    // frames a harmonic jump (x2, x3, /2, /3) must persist before it's believed
 
-function reset() { ring.fill(0); filled = 0; envRms = 0; attackLeft = 0; hist = []; floor = 0; gaps = 0; }
+let attackLeft = 0, sinceAttack = 1e9, hist = [], floor = 0, gaps = 0, est = 0, jumpN = 0, armed = false, recent = [];
+let debug = false, rec = null;
+
+function reset() { ring.fill(0); filled = 0; attackLeft = 0; sinceAttack = 1e9; hist = []; floor = 0; gaps = 0; est = 0; jumpN = 0; armed = false; recent = []; }
 
 // YIN with a sub-harmonic check. Returns {f, rms}; f = -1 when there is no clear note.
 function yin(x, sr) {
@@ -41,13 +52,16 @@ function yin(x, sr) {
     if (d[t] <= lim) { while (t + 1 <= tMax && d[t + 1] < d[t]) t++; tau = t; break; }
   }
   if (tau < 1) return { f: -1, rms, g: gmin };
-  // While a note settles, 2-3 cycles can match better than 1 (reads as 1/2 or 1/3
-  // of the real pitch). If a 1/k period also matches well, prefer it.
+  // While a note settles, or when another string rings in sympathy, 2-3 cycles can match
+  // better than 1 (reads as 1/2 or 1/3 of the real pitch). If a 1/k period also matches
+  // well, prefer it.
   for (const k of [4, 3, 2]) {
     const c0 = tau / k; if (c0 < tMin) continue;
     let bt = -1, bv = 1e9;
     for (let t = Math.floor(c0 - 3); t <= Math.ceil(c0 + 3); t++) if (d[t] < bv) { bv = d[t]; bt = t; }
-    if (bv < 0.25 && bv < 3 * d[tau]) { tau = bt; break; }
+    // Wins if nearly as good as the best match, or simply clean in its own right: another
+    // string ringing in sympathy can make 2-3 cycles repeat better than 1.
+    if (bv < 0.25 && (bv < 3 * d[tau] || bv < SUB_ABS)) { tau = bt; break; }
   }
   const a = d[tau - 1], b = d[tau], c = d[tau + 1] ?? b, den = a + c - 2 * b;
   const shift = den ? (a - c) / (2 * den) : 0;
@@ -63,38 +77,60 @@ function chunk(x) {
   if (filled < N) return;
   const { f, rms, g } = yin(ring, sr);
 
-  // Background noise level: drops fast to quiet moments and rises (doubles in ~1 s) only
-  // while no note is sounding, so a sustained note is never mistaken for background.
-  // It starts low, in case a string is already ringing when the tuner starts.
+  // Background noise level: drops fast to quiet moments; rises quickly between notes, so a
+  // steady hum (fridge, 100 Hz mains buzz) becomes background, and only slowly during a note,
+  // so notes and attacks never do. It starts low, in case a string is already ringing.
   // All loudness tests are relative to it, so the tuner behaves the same whether the mic
   // delivers a loud, boosted signal or a quiet raw one.
   if (!floor) floor = rms * 0.05;
   else if (rms < floor) floor = floor * 0.7 + rms * 0.3;
-  else if (f < 0) floor *= 1.01;
+  else if (!armed && sinceAttack > REFRACT_MS) floor *= RISE_IDLE;
+  else if (f < 0 && sinceAttack > REFRACT_MS) floor *= RISE;
   const snr = rms / (floor || 1e-9);
+  const db = 20 * Math.log10(rms + 1e-12);
 
   // Every message carries the loudness (r) for the visuals; a=1 marks a new pluck.
   let a = 0;
-  // A new pluck is a sudden jump in loudness well above the room: skip its noisy, sharp attack.
-  if (rms > envRms * 2.2 && snr > 8) { attackLeft = 100; hist = []; gaps = 0; a = 1; }
-  envRms = envRms * 0.9 + rms * 0.1;
+  sinceAttack += ms;
+  // A pluck is a jump of 8+ dB over the quietest of the last ~80 ms, well above the room
+  // (works right after a string was muted, too). One pluck = one trigger: its loudness keeps
+  // climbing for a few frames, so no re-trigger for REFRACT_MS. The noisy attack is skipped.
+  const quiet = recent.length ? Math.min(...recent) : rms;
+  recent.push(rms); if (recent.length > 5) recent.shift();
+  if (sinceAttack > REFRACT_MS && rms > quiet * 2.5 && snr > 8) {
+    attackLeft = ATTACK_MS; sinceAttack = 0; hist = []; gaps = 0; est = 0; jumpN = 0; armed = true; a = 1;
+  }
   const r = Math.round(Math.min(1, snr / 60) * 1e3) / 1e3;      // 0..1, independent of mic gain
-  const dbg = debug ? { fr: f, g: Math.round(g * 1e3) / 1e3, db: Math.round(20 * Math.log10(rms + 1e-12)), fl: Math.round(20 * Math.log10(floor + 1e-12)) } : undefined;
+  const dbg = debug ? { fr: f, g: Math.round(g * 1e3) / 1e3, db: Math.round(db), fl: Math.round(20 * Math.log10(floor + 1e-12)) } : undefined;
   const send = (t, extra) => postMessage(Object.assign({ t, r, a }, extra, dbg && { dbg }));
 
   if (attackLeft > 0) { attackLeft -= ms; send('busy'); return; }
+  if (!armed) { send('none'); return; }
   if (f < 60 || f > 1000 || snr < 2) {
     // Tolerate brief dropouts (2 frames) instead of restarting the count on every hiccup.
     if (++gaps > 2) hist = [];
+    if (gaps > 30) { est = 0; armed = false; }  // half a second of nothing: the note is over
     send('none'); return;
   }
   gaps = 0;
-  hist.push(f); if (hist.length > 4) hist.shift();
-  if (hist.length < 4) { send('busy'); return; }
-  // Trust a reading only once the last 4 frames (~67 ms) agree within 35 cents.
+  hist.push(f); if (hist.length > STAB) hist.shift();
+  if (hist.length < STAB) { send('busy'); return; }
+  // Trust a reading only once the last STAB frames agree within SPREAD cents.
   const s = [...hist].sort((p, q) => p - q);
-  if (1200 * Math.log2(s[3] / s[0]) > 35) { send('busy'); return; }
-  send('pitch', { f: (s[1] + s[2]) / 2 });
+  if (1200 * Math.log2(s[STAB - 1] / s[0]) > SPREAD) { send('busy'); return; }
+  const fm = s[STAB >> 1];
+  // Continuity: a string can't jump by an octave or more within one pluck. A sudden reading at
+  // 1/2, 1/3, 1/4 or 2x-4x of the established note (another string ringing in sympathy, a strong
+  // overtone) is held back unless it persists for JUMP_HOLD frames (~250 ms).
+  if (est) {
+    const r = fm / est, k = r >= 1 ? Math.round(r) : Math.round(1 / r);
+    const off = Math.abs(1200 * Math.log2(r >= 1 ? r / k : r * k));
+    if (k >= 2 && k <= 4 && off < 40) {
+      if (++jumpN < JUMP_HOLD) { send('busy'); return; }
+    }
+  }
+  est = fm; jumpN = 0;
+  send('pitch', { f: fm });
 }
 
 // Diagnostic capture: the exact samples this worker analyses, returned as one buffer.
