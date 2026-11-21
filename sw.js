@@ -1,7 +1,8 @@
 // Offline support. Bump VERSION to push an update; the old cache is removed on activate.
-const VERSION = 'tuner-v3';
+const VERSION = 'tuner-v4';
 const CORE = ['./', './index.html', './manifest.webmanifest',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon.svg'];
+  './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon.svg',
+  './tuner-worker.js', './tuner-worklet.js'];
 const FONTS = /^https:\/\/fonts\.(googleapis|gstatic)\.com\//;
 
 self.addEventListener('install', e => {

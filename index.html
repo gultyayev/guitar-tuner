@@ -47,6 +47,7 @@ button.ghost{flex:1 1 140px;min-height:52px;border:1px solid var(--line);border-
 button.ghost[aria-pressed=true]{border-color:var(--ok);color:var(--ok)}
 .hint{color:var(--dim);font-size:14px;margin-top:16px}
 .err{color:var(--off)}
+[hidden]{display:none!important}
 @media(prefers-reduced-motion:reduce){#needle{transition:none!important}}
 </style>
 </head>
@@ -75,15 +76,15 @@ button.ghost[aria-pressed=true]{border-color:var(--ok);color:var(--ok)}
       <circle cx="200" cy="200" r="10" fill="#f3ead8"/>
     </svg>
   </div>
-  <div class="note"><b id="note">–</b><span id="freq">Tap Start and pluck a string</span></div>
+  <div class="note"><b id="note">–</b><span id="freq">Pluck a string</span></div>
 
   <div class="status" id="status" aria-live="polite"></div>
 
   <div class="strings" id="strings"></div>
 
   <div class="row">
-    <button class="main" id="start">Start</button>
     <button class="ghost" id="auto" aria-pressed="true">Auto-detect: on</button>
+    <button class="main" id="retry" hidden>Retry</button>
   </div>
   <p class="hint">Auto mode picks the nearest string from what you play. Tap a string to lock onto it instead (handy when a string is far out of tune). Install it from your browser’s Share menu (“Add to Home Screen”) to use it offline.</p>
 </div>
@@ -92,125 +93,111 @@ button.ghost[aria-pressed=true]{border-color:var(--ok);color:var(--ok)}
 {
 const STR=[{n:'E',o:2,f:82.41},{n:'A',o:2,f:110.00},{n:'D',o:3,f:146.83},{n:'G',o:3,f:196.00},{n:'B',o:3,f:246.94},{n:'E',o:4,f:329.63}];
 const $=id=>document.getElementById(id);
-const strEl=$('strings'),needle=$('needle'),noteEl=$('note'),freqEl=$('freq'),statusEl=$('status'),startBtn=$('start'),autoBtn=$('auto');
-let ctx=null,an=null,buf=null,stream=null,raf=0,auto=true,cur=-1,cand=-1,candN=0,hist=[],tuned=new Set(),lastHeard=0,envRms=0,attackUntil=0,dispC=null,
-    isPaused=false,frozenN=0,lastProbe=NaN,idleShown=false,wake=null;
+const strEl=$('strings'),needle=$('needle'),noteEl=$('note'),freqEl=$('freq'),statusEl=$('status'),retryBtn=$('retry'),autoBtn=$('auto');
+let ctx=null,stream=null,worker=null,wake=null,running=false,starting=false,gen=0;
+let auto=true,cur=-1,cand=-1,candN=0,tuned=new Set(),dispC=null,lastMsg=0,lastHeard=0,idleShown=true;
 
 $('ticks').innerHTML=Array.from({length:11},(_,i)=>{const a=(-90+i*18)*Math.PI/180,r1=i%5?150:144,r2=168;
   return `<line x1="${200+r1*Math.sin(a)}" y1="${200-r1*Math.cos(a)}" x2="${200+r2*Math.sin(a)}" y2="${200-r2*Math.cos(a)}" stroke="#bfa995" stroke-width="${i%5?1.5:2.5}"/>`}).join('');
 
-function renderStrings(){
-  strEl.innerHTML=STR.map((s,i)=>`<button class="s${i===cur?' on':''}${tuned.has(i)?' tuned':''}" data-i="${i}" aria-label="String ${6-i}, ${s.n}${s.o}">${s.n}<small>${6-i} · ${s.n}${s.o}</small></button>`).join('');
-}
+let lastKey='';
+function renderStrings(force){const k=cur+'|'+auto+'|'+[...tuned].join(',');if(!force&&k===lastKey)return;lastKey=k;
+  strEl.innerHTML=STR.map((s,i)=>`<button class="s${i===cur?' on':''}${tuned.has(i)?' tuned':''}" data-i="${i}" aria-label="String ${6-i}, ${s.n}${s.o}">${s.n}<small>${6-i} · ${s.n}${s.o}</small></button>`).join('')}
 strEl.addEventListener('click',e=>{const b=e.target.closest('.s');if(!b)return;
-  const i=+b.dataset.i;if(!auto&&cur===i){setAuto(true);return}cur=i;setAuto(false);renderStrings()});
+  const i=+b.dataset.i;if(!auto&&cur===i){setAuto(true);return}cur=i;dispC=null;setAuto(false)});
 function setAuto(v){auto=v;autoBtn.setAttribute('aria-pressed',v);autoBtn.textContent='Auto-detect: '+(v?'on':'off');renderStrings()}
 autoBtn.addEventListener('click',()=>setAuto(!auto));
 
-// YIN pitch detection
-// Returns {f, conf, rms}; f = -1 when there's no clear periodic note.
-function yin(x,sr){
-  const N=x.length,W=N>>1,d=new Float32Array(W);let rms=0;
-  for(let i=0;i<N;i++)rms+=x[i]*x[i];rms=Math.sqrt(rms/N);
-  if(rms<0.006)return {f:-1,conf:0,rms};
-  const tMin=Math.floor(sr/1000),tMax=Math.min(W-1,Math.floor(sr/60));
-  for(let t=1;t<=tMax;t++){let s=0;for(let i=0;i<W;i++){const v=x[i]-x[i+t];s+=v*v}d[t]=s}
-  let run=0;d[0]=1;for(let t=1;t<=tMax;t++){run+=d[t];d[t]=d[t]*t/(run||1)}
-  // Global best dip: how periodic the signal is at all.
-  let gmin=1e9;for(let t=tMin;t<=tMax;t++)if(d[t]<gmin)gmin=d[t];
-  if(gmin>0.2)return {f:-1,conf:0,rms};           // noise / attack / decay tail
-  // Take the SHORTEST period whose dip is nearly as deep as the best one.
-  // A weak fundamental makes the half-period dip shallow-ish but not deep, so
-  // it no longer wins (that was the octave-up error); 2x/3x periods lose to the true one.
-  const lim=gmin+0.04;let tau=-1;
-  for(let t=tMin;t<=tMax;t++){if(d[t]<=lim){while(t+1<=tMax&&d[t+1]<d[t])t++;tau=t;break}}
-  if(tau<1)return {f:-1,conf:0,rms};
-  // Sub-harmonic check: while a note settles, 2 or 3 cycles can match better than 1,
-  // which reads as 1/2 or 1/3 of the real pitch. If a 1/k period also matches well, use it.
-  for(const k of [4,3,2]){const c0=tau/k;if(c0<tMin)continue;
-    let bt=-1,bv=1e9;for(let t=Math.floor(c0-3);t<=Math.ceil(c0+3);t++)if(d[t]<bv){bv=d[t];bt=t}
-    if(bv<0.25&&bv<3*d[tau]){tau=bt;break}}
-  const a=d[tau-1],b=d[tau],c=d[tau+1]??b,den=a+c-2*b;const shift=den?((a-c)/(2*den)):0;
-  return {f:sr/(tau+shift),conf:1-b,rms};
-}
 const cents=(f,ref)=>1200*Math.log2(f/ref);
 function nearest(f){let bi=0,bd=1e9;STR.forEach((s,i)=>{const d=Math.abs(cents(f,s.f));if(d<bd){bd=d;bi=i}});return bi}
+function say(text,color){statusEl.textContent=text;statusEl.style.color=color||'var(--dim)'}
 
 function idle(){ // no trusted reading: never leave an old value on screen
-  dispC=null;needle.style.transform='rotate(0deg)';needle.style.opacity='.3';
-  noteEl.style.color='var(--dim)';freqEl.textContent='Pluck a string';
-  statusEl.textContent='Listening…';statusEl.style.color='var(--dim)'}
-function paused(){ // the system stopped feeding audio (iOS does this when another app takes the mic)
-  if(isPaused)return;isPaused=true;idle();startBtn.textContent='Resume';
-  statusEl.textContent='Mic paused by the system — tap Resume';statusEl.style.color='var(--off)'}
-function loop(){
-  raf=requestAnimationFrame(loop);
-  if(ctx.state&&ctx.state!=='running'){paused();return}
-  an.getFloatTimeDomainData(buf);
-  const now=performance.now();
-  // A live mic is never bit-for-bit identical between frames. If it is for ~0.75 s, the input is frozen.
-  const probe=buf[0]+buf[1001]*3+buf[3003]*7;
-  if(probe===lastProbe){if(++frozenN>45){paused();return}}else{frozenN=0;lastProbe=probe}
-  if(isPaused&&frozenN===0){isPaused=false;startBtn.textContent='Stop';idle()} // audio came back on its own
-  const {f,rms}=yin(buf,ctx.sampleRate);
-  if(lastHeard&&now-lastHeard>1500&&!idleShown){idle();idleShown=true}
-  else if(lastHeard&&now-lastHeard>500)needle.style.opacity='.3'; // dim while unsure
-  // New pluck = sudden jump in loudness: ignore the noisy, sharp attack.
-  if(rms>envRms*2.2&&rms>0.02){attackUntil=now+150;hist=[]}
-  envRms=envRms*0.9+rms*0.1;
-  if(now<attackUntil)return;
-  if(f<60||f>1000){hist=[];return}
-  hist.push(f);if(hist.length>5)hist.shift();
-  // Only trust a reading once the last 5 frames (~85 ms) agree within 35 cents.
-  // Junk (pluck attack, finger touching the string) is hundreds of cents off and gets held back;
-  // a peg being turned sweeps slower than that and still shows.
-  if(hist.length<5)return;
-  const srt=[...hist].sort((a,b)=>a-b);if(cents(srt[4],srt[0])>35)return;
-  lastHeard=now;idleShown=false;needle.style.opacity='1';const fm=srt[2];
-  if(auto){const n=nearest(fm);
-    if(cur<0){cur=n}else if(n!==cur){if(n===cand)candN++;else{cand=n;candN=1}if(candN>=4){cur=n;candN=0;dispC=null}else return}else candN=0;} // undecided: hold the needle, never measure against the wrong string
+  idleShown=true;dispC=null;needle.style.transform='rotate(0deg)';needle.style.opacity='.3';
+  noteEl.style.color='var(--dim)';freqEl.textContent='Pluck a string';say('Listening…')}
+function fail(msg){ // something broke: say what, offer Retry
+  teardown();idle();noteEl.textContent='–';freqEl.textContent='';say(msg,'var(--off)');retryBtn.hidden=false}
+
+// One trusted pitch from the worker. Only drawing happens here.
+function onPitch(f){
+  lastHeard=performance.now();
+  if(auto){const n=nearest(f);
+    if(cur<0)cur=n;
+    else if(n!==cur){if(n===cand)candN++;else{cand=n;candN=1}
+      if(candN>=4){cur=n;candN=0;dispC=null}else return} // undecided: hold, never measure against the wrong string
+    else candN=0}
   if(cur<0)return;
-  const s=STR[cur];let c=cents(fm,s.f);
-  dispC=dispC==null?c:dispC+(c-dispC)*0.35;   // light easing — inputs are already stable
-  c=dispC;
-  const shown=Math.max(-50,Math.min(50,c));
-  needle.style.transform=`rotate(${shown*1.8}deg)`;
+  idleShown=false;needle.style.opacity='1';
+  const s=STR[cur];let c=cents(f,s.f);
+  dispC=dispC==null?c:dispC+(c-dispC)*0.35;c=dispC;
+  needle.style.transform=`rotate(${Math.max(-50,Math.min(50,c))*1.8}deg)`;
   noteEl.textContent=s.n;
-  freqEl.textContent=`${fm.toFixed(1)} Hz · target ${s.f.toFixed(2)} Hz · ${c>=0?'+':''}${c.toFixed(0)} ¢`;
+  freqEl.textContent=`${f.toFixed(1)} Hz · target ${s.f.toFixed(2)} Hz · ${c>=0?'+':''}${c.toFixed(0)} ¢`;
   const ok=Math.abs(c)<=5;
   noteEl.style.color=ok?'var(--ok)':Math.abs(c)<=15?'#e9c46a':'var(--off)';
-  if(ok){statusEl.textContent='In tune ✓';statusEl.style.color='var(--ok)';if(!tuned.has(cur)){tuned.add(cur)}}
-  else{statusEl.textContent=c<0?`Too low — tighten (${Math.abs(c).toFixed(0)} ¢ flat)`:`Too high — loosen (${c.toFixed(0)} ¢ sharp)`;statusEl.style.color='var(--off)'}
-  renderStringsCheap();
+  if(ok){say('In tune ✓','var(--ok)');tuned.add(cur)}
+  else say(c<0?`Too low — tighten (${Math.abs(c).toFixed(0)} ¢ flat)`:`Too high — loosen (${c.toFixed(0)} ¢ sharp)`,'var(--off)');
+  renderStrings();
 }
-let lastKey='';
-function renderStringsCheap(){const k=cur+'|'+[...tuned].join(',');if(k!==lastKey){lastKey=k;renderStrings()}}
+
+// Watchdog: stale readings fade out; if audio stops arriving, say so and offer Retry.
+setInterval(()=>{
+  if(!running)return;const now=performance.now();
+  if(ctx&&ctx.state==='suspended'){lastMsg=now;say('Tap anywhere to start listening');return}
+  if(now-lastMsg>1000){fail('The mic stopped sending sound.');return}
+  if(!idleShown&&now-lastHeard>1500)idle();
+  else if(!idleShown&&now-lastHeard>500)needle.style.opacity='.3'; // dim while unsure
+},250);
 
 async function start(){
-  // Create and resume the audio context inside the tap itself: iOS keeps it suspended otherwise.
-  ctx=new (window.AudioContext||window.webkitAudioContext)();ctx.resume?.();
-  isPaused=false;frozenN=0;lastProbe=NaN;hist=[];lastHeard=0;idleShown=false;
-  startBtn.textContent='Stop';
+  if(starting||running)return;starting=true;const my=++gen;
+  retryBtn.hidden=true;say('Starting the mic…');
   try{
-    stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-    stream.getAudioTracks().forEach(t=>t.addEventListener('ended',paused));
+    if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw new Error('Open the tuner over https to use the mic.');
+    if(!window.AudioWorkletNode)throw new Error('This browser is too old for the tuner.');
+    ctx=new (window.AudioContext||window.webkitAudioContext)();
+    ctx.resume().catch(()=>{});
+    worker=worker||new Worker('tuner-worker.js');
+    const [s]=await Promise.all([
+      navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}),
+      ctx.audioWorklet.addModule('tuner-worklet.js')]);
+    if(my!==gen){s.getTracks().forEach(t=>t.stop());return}
+    stream=s;stream.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>running&&fail('The mic was turned off.')));
     const src=ctx.createMediaStreamSource(stream);
-    const hp=ctx.createBiquadFilter();hp.type='highpass';hp.frequency.value=60;
-    an=ctx.createAnalyser();an.fftSize=4096;buf=new Float32Array(an.fftSize);
-    src.connect(hp);hp.connect(an);await ctx.resume?.();
-    idle();loop();
+    const hp=new BiquadFilterNode(ctx,{type:'highpass',frequency:60});
+    const hop=Math.round(ctx.sampleRate/60);
+    const tap=new AudioWorkletNode(ctx,'tuner-tap',{numberOfInputs:1,numberOfOutputs:1,channelCount:1,channelCountMode:'explicit',processorOptions:{hop}});
+    const mute=new GainNode(ctx,{gain:0});
+    src.connect(hp).connect(tap).connect(mute).connect(ctx.destination); // silent output keeps the graph running
+    // Audio thread → worker directly; the UI thread only receives results.
+    const ch=new MessageChannel();
+    tap.port.postMessage({port:ch.port1},[ch.port1]);
+    worker.postMessage({t:'init',sr:ctx.sampleRate,port:ch.port2},[ch.port2]);
+    worker.onmessage=e=>{lastMsg=performance.now();if(e.data.t==='pitch')onPitch(e.data.f)};
+    lastMsg=performance.now();running=true;idle();
+    ctx.onstatechange=()=>{if(running&&ctx&&ctx.state==='running')idle()};
+    if(ctx.state!=='running'){say('Tap anywhere to start listening');ctx.resume().catch(()=>{})} // Safari lets an active mic start audio without a tap
     try{wake=await navigator.wakeLock?.request('screen')}catch{} // keep the screen on while tuning
-  }catch(e){stop();statusEl.innerHTML='<span class="err">Microphone unavailable: '+(e.message||e.name)+'</span>'}
+  }catch(e){
+    const m=e&&e.name==='NotAllowedError'?'Mic access was blocked. Allow it in your browser settings, then Retry.'
+      :e&&e.name==='NotFoundError'?'No microphone found.':'Could not start the mic: '+(e&&e.message||e);
+    fail(m);
+  }finally{starting=false}
 }
-function stop(){cancelAnimationFrame(raf);stream?.getTracks().forEach(t=>t.stop());stream=null;ctx?.close().catch(()=>{});ctx=null;
-  wake?.release?.().catch(()=>{});wake=null;isPaused=false;dispC=null;
-  startBtn.textContent='Start';statusEl.textContent='';needle.style.transform='rotate(0deg)';needle.style.opacity='1';noteEl.textContent='–';noteEl.style.color='';freqEl.textContent='Tap Start and pluck a string'}
-// Resume = full restart with a fresh mic stream: the reliable way back after iOS pulls the mic.
-startBtn.addEventListener('click',()=>{if(ctx&&!isPaused){stop();return}if(ctx)stop();start()});
-// Back from the background (screen lock, app switch): the old stream is usually dead, restart it.
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&ctx&&(isPaused||ctx.state!=='running')){stop();start()}});
+function teardown(){
+  gen++;running=false;stream?.getTracks().forEach(t=>t.stop());stream=null;
+  ctx?.close().catch(()=>{});ctx=null;wake?.release?.().catch(()=>{});wake=null}
+
+// Browsers may hold audio until the first tap; any tap on the page resumes it.
+document.addEventListener('pointerdown',()=>{if(ctx&&ctx.state==='suspended')ctx.resume().then(()=>running&&idle()).catch(()=>{})});
+retryBtn.addEventListener('click',()=>{teardown();start()});
+// Release the mic in the background; pick it up again on return.
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'){if(running||starting)teardown()}
+  else if(!running&&!starting&&retryBtn.hidden)start()});
 if('serviceWorker' in navigator&&isSecureContext)navigator.serviceWorker.register('./sw.js').catch(()=>{});
-renderStrings();
+renderStrings(true);
+start();
 }
 </script>
 </body>
