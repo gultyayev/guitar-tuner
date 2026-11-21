@@ -28,3 +28,5 @@ The worklet talks to the worker over a `MessageChannel`, so audio never passes t
 ## Tuning the detector
 
 The constants at the top of `tuner-worker.js` were chosen against real recordings (iPhone and macOS, all six strings): zero wrong readings, first reading ~167 ms after a pluck, identical results from 100% down to 1% input level.
+
+Run `node tools/eval.mjs` after any detector change (synthetic suite + any WAVs in the git-ignored `recordings/` folder). See `CLAUDE.md` for details.

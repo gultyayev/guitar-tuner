@@ -15,7 +15,7 @@
 
     let W = 1, H = 1, DPR = 1, loop = 0, last = 0, running = false, reducedMotion = false;
     let colors = { mode: 'dark', a: '#fff4e0', b: '#b8d0ff', ok: '#7dffd4' }, sprites = null;
-    const P = [], MAX = 280;
+    const P = [], MAX = 900;
     let energy = 0, boost = 0, okGlow = 0, tuneState = 'idle', band = Math.random() * 6.28, acc = 0;
 
     const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
@@ -40,7 +40,8 @@
       P.push({
         x, y: burst ? H * (0.55 + Math.random() * 0.5) : H + 6 * DPR,
         vx: speed * (W * 0.42 / H) * (0.75 + Math.random() * 0.5), vy: -speed,
-        r: (0.55 + Math.pow(Math.random(), 3) * 2.1) * DPR * (burst ? 1.2 : 1),
+        // 60% fine specks (drawn as single dots), 40% glowing motes
+        r: (Math.random() < 0.6 ? 0.35 + Math.random() * 0.5 : 0.6 + Math.pow(Math.random(), 3) * 2.1) * DPR * (burst ? 1.2 : 1),
         a: (0.3 + Math.random() * 0.6) * (burst ? 1 : 0.85),
         tw: Math.random() * 6.28, tws: 1 + Math.random() * 3, wob: Math.random() * 6.28, wobs: 0.3 + Math.random() * 0.8,
         c: kind || (Math.random() < 0.65 ? 'a' : 'b'), k: Math.random(), life: 0,
@@ -53,7 +54,7 @@
       energy *= Math.exp(-dt * 2.2); boost *= Math.exp(-dt * 1.3);
       okGlow += ((tuneState === 'ok' ? 1 : 0) - okGlow) * Math.min(1, dt * 2.5);
       band += dt * 0.04;
-      acc += (4 + energy * 70) * dt;               // calm drizzle, heavier while a string rings
+      acc += (14 + energy * 180) * dt;             // steady drizzle, much heavier while a string rings
       while (acc >= 1) { spawn(false); acc--; }
       const sp = 1 + boost * 2.4;
       for (let i = P.length - 1; i >= 0; i--) {
@@ -77,19 +78,25 @@
         const dx = p.x / W - 0.5, dy = yn - 0.45;
         const clear = Math.min(1, 0.28 + dx * dx * 5 + dy * dy * 7);
         const tw = 0.62 + 0.38 * Math.sin(p.tw);
-        const alpha = p.a * fade * clear * tw * (dark ? 1 : 0.6);
+        const alpha = p.a * fade * clear * tw;
         if (alpha < 0.012) continue;
         g.globalAlpha = Math.min(1, alpha);
-        const spr = (p.c === 'ok' || p.k < okGlow * 0.85) ? sprites.ok : sprites[p.c];
-        const s = p.r * 6;
-        g.drawImage(spr, p.x - s / 2, p.y - s / 2, s, s);
+        const key = (p.c === 'ok' || p.k < okGlow * 0.85) ? 'ok' : p.c;
+        if (p.r < 0.9 * DPR) {             // fine speck: a single soft dot, no glow
+          g.fillStyle = colors[key];
+          const s = p.r * 2;
+          g.fillRect(p.x - p.r, p.y - p.r, s, s);
+        } else {
+          const s = p.r * 6;
+          g.drawImage(sprites[key], p.x - s / 2, p.y - s / 2, s, s);
+        }
       }
       g.globalAlpha = 1;
     }
 
     function still() { // reduced motion: a quiet, static sprinkle
       P.length = 0;
-      for (let i = 0; i < 90; i++) { spawn(false); const p = P[P.length - 1]; p.y = Math.random() * H; p.life = 1; p.x = Math.random() * W; }
+      for (let i = 0; i < 240; i++) { spawn(false); const p = P[P.length - 1]; p.y = Math.random() * H; p.life = 1; p.x = Math.random() * W; }
       draw();
     }
 
@@ -104,7 +111,7 @@
       start() {
         if (running || reducedMotion) return;
         running = true; last = performance.now();
-        if (!P.length) for (let i = 0; i < 60; i++) { spawn(false); const p = P[P.length - 1]; p.y = Math.random() * H; p.life = 1; }
+        if (!P.length) for (let i = 0; i < 220; i++) { spawn(false); const p = P[P.length - 1]; p.y = Math.random() * H; p.life = 1; }
         loop = raf(frame);
       },
       pause() { running = false; caf(loop); },
@@ -113,12 +120,12 @@
         if (v > energy) energy = v;
         if (attack && !reducedMotion) {
           boost = Math.min(1, boost + 0.35 + v * 0.65);
-          const n = Math.round(10 + v * 45);
+          const n = Math.round(30 + v * 120);
           for (let i = 0; i < n; i++) spawn(true);
         }
       },
       tune(s) { tuneState = s; },
-      celebrate() { if (!reducedMotion) for (let i = 0; i < 40; i++) spawn(true, 'ok'); },
+      celebrate() { if (!reducedMotion) for (let i = 0; i < 90; i++) spawn(true, 'ok'); },
     };
     return api;
   }
