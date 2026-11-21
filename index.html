@@ -24,7 +24,7 @@
 :root{color-scheme:dark;--bg:#2a1611;--bg2:#3a1f17;--ink:#f3ead8;--dim:#bfa995;--ok:#5fe0b0;--off:#ff7a59;--line:#5a3628}
 *{box-sizing:border-box;min-width:0}
 body{margin:0;min-height:100vh;background:radial-gradient(120% 80% at 50% 0%,var(--bg2),var(--bg));color:var(--ink);font:16px/1.5 "Instrument Sans",system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;
-  padding:max(24px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(40px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  padding:calc(env(safe-area-inset-top) + 32px) max(16px,env(safe-area-inset-right)) max(40px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
   -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 h1{font:800 32px/1.05 "Sofia Sans Condensed","Arial Narrow",system-ui,sans-serif;margin:0 0 4px}
 .sub{color:var(--dim);margin:0 0 18px;font-size:15px}
@@ -195,7 +195,15 @@ retryBtn.addEventListener('click',()=>{teardown();start()});
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='hidden'){if(running||starting)teardown()}
   else if(!running&&!starting&&retryBtn.hidden)start()});
-if('serviceWorker' in navigator&&isSecureContext)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+if('serviceWorker' in navigator&&isSecureContext){
+  // Updates: check whenever the app comes to the foreground (iOS resumes home-screen apps instead
+  // of reloading them), and reload once when a new version takes over.
+  const hadSW=!!navigator.serviceWorker.controller;let reloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadSW&&!reloaded){reloaded=true;location.reload()}});
+  navigator.serviceWorker.register('./sw.js').then(reg=>{
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')reg.update().catch(()=>{})});
+  }).catch(()=>{});
+}
 renderStrings(true);
 start();
 }
