@@ -3,6 +3,8 @@
 Offline-capable guitar tuner (PWA) with automatic string detection for standard tuning (E A D G B E, A4 = 440 Hz).
 
 - Starts listening on load. Browsers may hold audio until the first tap; then any tap on the page starts it. A Retry button appears only if the mic fails.
+- Works at any mic level: loudness is judged against a continuously learned room-noise floor, not a fixed threshold.
+- Diagnostics: tap the title 5 times for live mic/detector stats and an 8 s capture (WAV) of exactly what the detector hears.
 - Follows the system light/dark setting; honours reduced motion (dust becomes a still sprinkle).
 - Auto-detect picks the nearest string; tap a string to lock it, tap again to unlock.
 - Install: open the Pages URL, then **Share → Add to Home Screen** (iOS) or **Install app** (Android/desktop Chrome). Works offline after the first load.

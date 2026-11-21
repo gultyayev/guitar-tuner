@@ -109,7 +109,7 @@
       },
       pause() { running = false; caf(loop); },
       level(rms, attack) {
-        const v = Math.min(1, rms * 14);
+        const v = Math.min(1, rms);           // already 0..1: loudness above the room
         if (v > energy) energy = v;
         if (attack && !reducedMotion) {
           boost = Math.min(1, boost + 0.35 + v * 0.65);

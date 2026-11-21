@@ -90,6 +90,13 @@ h1{font-size:22px;font-weight:700;margin:0;letter-spacing:-.01em}
 .peg.on{background:var(--ink);color:var(--bg)}.peg.on small{color:color-mix(in srgb,var(--bg) 70%,transparent)}
 .peg.tuned::after{content:"";position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .hint{color:var(--dim);font-size:13px;text-align:center;margin:12px 0 0}
+.diag{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 12px);z-index:5;max-width:496px;margin:0 auto;padding:14px;border-radius:18px;
+  background:color-mix(in srgb,var(--bg) 88%,transparent);border:1px solid var(--chipline);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);-webkit-user-select:text;user-select:text}
+.diag pre{margin:0 0 10px;white-space:pre-wrap;word-break:break-word}
+.diag .row{display:flex;gap:8px;flex-wrap:wrap}
+.diag button{min-height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--chipline);background:var(--chip);color:var(--ink);font:600 13px ui-rounded,system-ui,sans-serif;cursor:pointer}
+.diag a{color:var(--ok);font:600 13px ui-rounded,system-ui,sans-serif;align-self:center}
 button:focus-visible{outline:2px solid var(--ok);outline-offset:3px}
 [hidden]{display:none!important}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -131,6 +138,10 @@ button:focus-visible{outline:2px solid var(--ok);outline-offset:3px}
   <nav class="pegs" id="strings" aria-label="Strings"></nav>
   <p class="hint">Tap a string to lock it · tap it again for auto</p>
 </div>
+<section class="diag" id="diag" hidden aria-label="Diagnostics">
+  <pre id="diagText">…</pre>
+  <div class="row"><button id="recBtn">Record 8 s for diagnosis</button><a id="recLink" hidden></a><button id="diagClose">Close</button></div>
+</section>
 
 <script>
 {
@@ -157,7 +168,7 @@ function draw(c){const deg=Math.max(-50,Math.min(50,c))*1.8;
   needle.style.transform=`rotate(${deg}deg)`;needle.style.transformOrigin=`${CX}px ${CY}px`;
   dev.setAttribute('d',Math.abs(deg)<0.4?'':arc(0,deg,R))}
 function tick(t){const dt=Math.min(.05,(t-lastT)/1000||.016);lastT=t;
-  const k=170,damp=2*Math.sqrt(k)*.82;vel+=(k*(target-shown)-damp*vel)*dt;shown+=vel*dt;draw(shown);
+  const k=320,damp=2*Math.sqrt(k)*.85;vel+=(k*(target-shown)-damp*vel)*dt;shown+=vel*dt;draw(shown);
   anim=Math.abs(target-shown)>.05||Math.abs(vel)>.05?requestAnimationFrame(tick):0}
 function setTarget(c){target=c;if(reduceMotion.matches){shown=c;vel=0;draw(c);return}if(!anim){lastT=performance.now();anim=requestAnimationFrame(tick)}}
 
@@ -212,7 +223,6 @@ function onPitch(f){
   if(cur<0)return;
   idleShown=false;gauge.classList.remove('idle');
   const s=STR[cur];let c=cents(f,s.f);
-  dispC=dispC==null?c:dispC+(c-dispC)*0.35;c=dispC;
   setTarget(c);showNote();
   const a=Math.abs(c),ok=a<=5;
   centsEl.textContent=(c>=0?'+':'−')+Math.abs(c).toFixed(0)+' ¢';
@@ -258,7 +268,11 @@ async function start(){
     const ch=new MessageChannel();
     tap.port.postMessage({port:ch.port1},[ch.port1]);
     worker.postMessage({t:'init',sr:ctx.sampleRate,port:ch.port2},[ch.port2]);
-    worker.onmessage=e=>{const m=e.data;lastMsg=performance.now();fxCall('level',m.r,m.a);if(m.t==='pitch')onPitch(m.f)};
+    worker.onmessage=e=>{const m=e.data;lastMsg=performance.now();
+      if(m.t==='recdone'){recDone(m);return}
+      if(diagOn)diagFrame(m);
+      fxCall('level',m.r,m.a);if(m.t==='pitch')onPitch(m.f)};
+    worker.postMessage({t:'debug',on:diagOn});
     lastMsg=performance.now();running=true;idle();
     ctx.onstatechange=()=>{if(running&&ctx&&ctx.state==='running')idle()};
     if(ctx.state!=='running'){say('Tap anywhere to start listening');ctx.resume().catch(()=>{})} // Safari lets an active mic start audio without a tap
@@ -289,6 +303,38 @@ if('serviceWorker' in navigator&&isSecureContext){
   navigator.serviceWorker.register('./sw.js').then(reg=>{
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')reg.update().catch(()=>{})});
   }).catch(()=>{});
+}
+// ---------- diagnostics: tap the title 5 times ----------
+const diag=$('diag'),diagText=$('diagText'),recBtn=$('recBtn'),recLink=$('recLink');
+let diagOn=false,taps=0,tapT=0,dg={n:0,t0:performance.now(),last:null,pitches:0,rate:0};
+document.querySelector('h1').addEventListener('click',()=>{const now=performance.now();taps=now-tapT<600?taps+1:1;tapT=now;
+  if(taps>=5){taps=0;setDiag(!diagOn)}});
+$('diagClose').addEventListener('click',()=>setDiag(false));
+function setDiag(on){diagOn=on;diag.hidden=!on;worker?.postMessage({t:'debug',on});if(on)diagRender()}
+function diagFrame(m){dg.n++;dg.last=m;if(m.t==='pitch')dg.pitches++;const now=performance.now();
+  if(now-dg.t0>=1000){dg.rate=dg.n;dg.n=0;dg.t0=now;diagRender()}}
+function diagRender(){
+  const tr=stream?.getAudioTracks()[0],st=tr?.getSettings?.()||{},m=dg.last||{},d=m.dbg||{};
+  diagText.textContent=[
+    `audio  ${ctx?ctx.sampleRate+' Hz, '+ctx.state:'none'} · worker msgs/s ${dg.rate} · fx ${window.__fxMode||'-'}`,
+    `mic    ${tr?tr.label||'(no label)':'none'}${tr?' · '+tr.readyState+(tr.muted?' · MUTED':''):''}`,
+    `apply  echoCancel=${st.echoCancellation} noiseSupp=${st.noiseSuppression} autoGain=${st.autoGainControl} rate=${st.sampleRate} ch=${st.channelCount}`,
+    `level  ${d.db??'-'} dBFS · room ${d.fl??'-'} dBFS · snr ${d.db!=null?(d.db-d.fl)+' dB':'-'}`,
+    `detect ${m.t||'-'} · raw ${d.fr>0?d.fr.toFixed(1)+' Hz':'—'} · clarity ${d.g!=null?(1-d.g).toFixed(2):'-'} · trusted/s ${dg.pitches}`,
+  ].join('\n');dg.pitches=0}
+// Record exactly what the detector hears, as a WAV to share back.
+recBtn.addEventListener('click',()=>{if(!worker||!running){recBtn.textContent='Mic not running';return}
+  recLink.hidden=true;recBtn.disabled=true;recBtn.textContent='Recording… pluck each string';worker.postMessage({t:'rec',seconds:8})});
+function recDone({sr,data}){
+  const b=new ArrayBuffer(44+data.length*2),v=new DataView(b),w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+  let peak=0;for(const x of data)peak=Math.max(peak,Math.abs(x));
+  w(0,'RIFF');v.setUint32(4,36+data.length*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,data.length*2,true);
+  for(let i=0;i<data.length;i++)v.setInt16(44+i*2,Math.max(-1,Math.min(1,data[i]))*32767,true); // raw level, not normalised
+  const file=new File([b],`tuner-capture-${new Date().toISOString().slice(11,19).replace(/:/g,'')}.wav`,{type:'audio/wav'});
+  recBtn.disabled=false;recBtn.textContent=`Record 8 s again (last peak ${(20*Math.log10(peak+1e-12)).toFixed(0)} dBFS)`;
+  const url=URL.createObjectURL(file);recLink.href=url;recLink.download=file.name;recLink.textContent='Save / share';recLink.hidden=false;
+  recLink.onclick=async e=>{if(navigator.canShare?.({files:[file]})){e.preventDefault();try{await navigator.share({files:[file],title:'Tuner capture'})}catch{}}};
 }
 renderStrings(true);draw(0);initFx();start();
 }
