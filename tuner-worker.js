@@ -4,6 +4,7 @@
 //   {t:'pitch', f}  a trusted reading (5 consecutive frames agree)
 //   {t:'busy'}      sound present but not trustworthy yet (pluck attack, settling)
 //   {t:'none'}      silence / no clear note
+// Every message also carries r (loudness, for the visuals) and a (1 = new pluck).
 // Timing is counted in samples, not wall-clock, so it is identical on every device.
 // Cost: ~1 ms of work per 16.7 ms hop on a desktop CPU, a few ms on a phone, all on
 // this background thread. (Decimating to 24 kHz was tried: 2x cheaper, but it let
@@ -60,17 +61,20 @@ function chunk(x) {
   filled = Math.min(N, filled + x.length);
   if (filled < N) return;
   const { f, rms } = yin(ring, sr);
+  // Every message carries the loudness (r) for the visuals; a=1 marks a new pluck.
+  let a = 0;
   // A new pluck is a sudden jump in loudness: skip its noisy, sharp attack.
-  if (rms > envRms * 2.2 && rms > 0.02) { attackLeft = 150; hist = []; }
+  if (rms > envRms * 2.2 && rms > 0.02) { attackLeft = 150; hist = []; a = 1; }
   envRms = envRms * 0.9 + rms * 0.1;
-  if (attackLeft > 0) { attackLeft -= ms; postMessage({ t: 'busy' }); return; }
-  if (f < 60 || f > 1000) { hist = []; postMessage({ t: 'none' }); return; }
+  const r = Math.round(rms * 1e4) / 1e4;
+  if (attackLeft > 0) { attackLeft -= ms; postMessage({ t: 'busy', r, a }); return; }
+  if (f < 60 || f > 1000) { hist = []; postMessage({ t: 'none', r, a }); return; }
   hist.push(f); if (hist.length > 5) hist.shift();
-  if (hist.length < 5) { postMessage({ t: 'busy' }); return; }
+  if (hist.length < 5) { postMessage({ t: 'busy', r, a }); return; }
   // Trust a reading only once the last 5 frames (~85 ms) agree within 35 cents.
   const s = [...hist].sort((p, q) => p - q);
-  if (1200 * Math.log2(s[4] / s[0]) > 35) { postMessage({ t: 'busy' }); return; }
-  postMessage({ t: 'pitch', f: s[2] });
+  if (1200 * Math.log2(s[4] / s[0]) > 35) { postMessage({ t: 'busy', r, a }); return; }
+  postMessage({ t: 'pitch', f: s[2], r, a });
 }
 
 onmessage = e => {

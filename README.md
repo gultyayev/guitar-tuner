@@ -3,6 +3,7 @@
 Offline-capable guitar tuner (PWA) with automatic string detection for standard tuning (E A D G B E, A4 = 440 Hz).
 
 - Starts listening on load. Browsers may hold audio until the first tap; then any tap on the page starts it. A Retry button appears only if the mic fails.
+- Follows the system light/dark setting; honours reduced motion (dust becomes a still sprinkle).
 - Auto-detect picks the nearest string; tap a string to lock it, tap again to unlock.
 - Install: open the Pages URL, then **Share → Add to Home Screen** (iOS) or **Install app** (Android/desktop Chrome). Works offline after the first load.
 
@@ -14,6 +15,7 @@ No build step; static files served from the repo root.
 |---|---|---|
 | `tuner-worklet.js` | audio render thread | batches mic samples into ~16 ms chunks, transfers them to the worker |
 | `tuner-worker.js` | Web Worker | YIN pitch detection with a sub-harmonic check, pluck-attack skip, 5-frame stability gate |
+| `fx.js` | Web Worker (OffscreenCanvas), main-thread fallback | rising light-dust background that reacts to plucks and turns mint in tune |
 | `index.html` | main thread | string choice and drawing only |
 | `sw.js` | service worker | offline cache (stale-while-revalidate); bump `VERSION` on release |
 

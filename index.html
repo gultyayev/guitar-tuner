@@ -4,121 +4,204 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Guitar Tuner</title>
-<meta name="theme-color" content="#2a1611">
 <meta name="description" content="Offline guitar tuner with automatic string detection, standard tuning.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f5f1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05060c">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Tuner">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Sofia+Sans+Condensed:wght@600;800&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>
-/* VOICE: calm, precise instrument
-   IDEA: a pedal tuner on a rosewood fretboard
-   PICTURE: big arc gauge with needle + six strings with the active one lit
-   COLOUR/TYPE: rosewood ground, bone ink, mint for in-tune, coral for off
-   LAYOUT: note + gauge, strings row, controls */
-:root{color-scheme:dark;--bg:#2a1611;--bg2:#3a1f17;--ink:#f3ead8;--dim:#bfa995;--ok:#5fe0b0;--off:#ff7a59;--line:#5a3628}
+/* VOICE: calm instrument under a night sky; precise, never busy
+   IDEA: a tuner floating on the Milky Way, dust rising as strings ring
+   PICTURE: tick ring + deviation arc + springy needle, rising light dust behind
+   COLOUR/TYPE: ink-night or warm paper (follows the system); mint = in tune, amber = close, coral = off; system rounded font
+   LAYOUT: top bar, gauge, note readout, string pegs; one column, thumb-reachable */
+:root{
+  --bg:#f6f5f1;--glow:#ffffff;--ink:#15161f;--dim:#6c6f82;--faint:#a9abb9;--line:#dedcd5;--chip:#ffffffb3;--chipline:#e6e3dc;
+  --ok:#0fa673;--warn:#c88a10;--off:#e0533d;--needle:#15161f;
+  --dust-a:#b58a3c;--dust-b:#7d84a6;--dust-ok:#14b07c;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#05060c;--glow:#161c3d;--ink:#eef0ff;--dim:#8d92ad;--faint:#4b5070;--line:#22263d;--chip:#ffffff0d;--chipline:#ffffff17;
+  --ok:#5fe6b6;--warn:#f4c766;--off:#ff7b6b;--needle:#f4f5ff;
+  --dust-a:#fff2dc;--dust-b:#b6ceff;--dust-ok:#7dffd4;
+}}
 *{box-sizing:border-box;min-width:0}
-body{margin:0;min-height:100vh;background:radial-gradient(120% 80% at 50% 0%,var(--bg2),var(--bg));color:var(--ink);font:16px/1.5 "Instrument Sans",system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;
-  padding:calc(env(safe-area-inset-top) + 32px) max(16px,env(safe-area-inset-right)) max(40px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
-  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
-h1{font:800 32px/1.05 "Sofia Sans Condensed","Arial Narrow",system-ui,sans-serif;margin:0 0 4px}
-.sub{color:var(--dim);margin:0 0 18px;font-size:15px}
-.wrap{width:100%;max-width:520px}
-.gauge{position:relative;width:100%;aspect-ratio:400/240}
-.gauge svg{position:absolute;inset:0;width:100%;height:100%}
-.note{text-align:center;margin-top:-4px}
-.note b{font:800 clamp(56px,18vw,96px)/1 "Sofia Sans Condensed","Arial Narrow",system-ui,sans-serif;display:block;transition:color .2s}
-.note span{color:var(--dim);font-size:15px;white-space:nowrap}
-.status{text-align:center;font-weight:600;min-height:26px;margin:6px 0 18px;font-size:17px}
-.strings{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:18px}
-.s{min-height:64px;border:1px solid var(--line);border-radius:12px;background:#ffffff08;color:var(--ink);font:600 15px "Instrument Sans",system-ui,sans-serif;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:background .15s,border-color .15s}
-.s small{color:var(--dim);font-weight:400;font-size:13px}
-.s.on{border-color:var(--ink);background:#ffffff1a}
-.s.tuned{border-color:var(--ok);background:#5fe0b022}
-.s:focus-visible,button:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
-.row{display:flex;gap:10px;flex-wrap:wrap}
-button.main{flex:1 1 200px;min-height:52px;border:0;border-radius:12px;background:var(--ink);color:var(--bg);font:800 20px "Sofia Sans Condensed","Arial Narrow",system-ui,sans-serif;cursor:pointer}
-button.ghost{flex:1 1 140px;min-height:52px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--ink);font:600 15px "Instrument Sans",system-ui,sans-serif;cursor:pointer}
-button.ghost[aria-pressed=true]{border-color:var(--ok);color:var(--ok)}
-.hint{color:var(--dim);font-size:14px;margin-top:16px}
-.err{color:var(--off)}
+html,body{height:100%}
+body{margin:0;background:radial-gradient(120% 70% at 50% 0%,var(--glow),var(--bg) 70%) fixed,var(--bg);color:var(--ink);
+  font:16px/1.45 ui-rounded,"SF Pro Rounded",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overflow-x:clip}
+#dust{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+.app{position:relative;z-index:1;min-height:100dvh;display:flex;flex-direction:column;max-width:520px;margin:0 auto;
+  padding:calc(env(safe-area-inset-top) + 18px) max(20px,env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 20px) max(20px,env(safe-area-inset-left))}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:22px;font-weight:700;margin:0;letter-spacing:-.01em}
+.sub{color:var(--dim);font-size:13px;margin:1px 0 0}
+.switch{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 4px 0 14px;border:0;background:none;color:var(--ink);font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.switch i{position:relative;width:44px;height:26px;border-radius:13px;background:var(--line);transition:background .25s}
+.switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transition:transform .25s cubic-bezier(.3,1.4,.6,1)}
+.switch[aria-checked=true] i{background:var(--ok)}
+.switch[aria-checked=true] i::after{transform:translateX(18px)}
+
+.stage{flex:1;display:flex;flex-direction:column;justify-content:center;padding:8px 0}
+.gauge{position:relative;width:100%;max-width:420px;margin:0 auto;aspect-ratio:400/228}
+.gauge svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.tick{stroke:var(--faint);stroke-linecap:round}
+.tick.major{stroke:var(--dim)}
+.tick.zero{stroke:var(--ok)}
+.track{stroke:var(--line)}
+.zone{stroke:var(--ok);opacity:.28}
+#dev{transition:stroke .3s}
+#needle line{stroke:var(--needle)}
+#needle,#dev{transition:opacity .4s}
+.gauge.idle #needle{opacity:.28}.gauge.idle #dev{opacity:0}
+.flatsharp{fill:var(--dim);font-size:20px;font-weight:600}
+.hub{fill:var(--bg);stroke:var(--needle);stroke-width:3}
+
+.readout{text-align:center;margin-top:-6px;position:relative}
+.note{font-size:clamp(84px,27vw,120px);font-weight:700;line-height:1;letter-spacing:-.03em;display:inline-flex;align-items:flex-start;transition:color .3s,text-shadow .3s}
+.note sub{font-size:.26em;font-weight:600;color:var(--dim);margin:.62em 0 0 .06em;vertical-align:baseline}
+.readout.ok .note{color:var(--ok);text-shadow:0 0 28px color-mix(in srgb,var(--ok) 45%,transparent)}
+.readout.ok::before{content:"";position:absolute;left:50%;top:44px;width:150px;height:150px;margin-left:-75px;border-radius:50%;
+  border:2px solid var(--ok);opacity:0;animation:ring 1.1s ease-out 1;pointer-events:none}
+@keyframes ring{0%{transform:scale(.55);opacity:.55}100%{transform:scale(1.35);opacity:0}}
+.cents{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;height:30px;color:var(--dim);transition:color .3s}
+.pill{display:inline-flex;align-items:center;gap:6px;margin-top:10px;min-height:34px;padding:6px 14px;border-radius:999px;font-size:15px;font-weight:600;
+  background:var(--chip);border:1px solid var(--chipline);color:var(--dim);transition:color .3s,background .3s,border-color .3s;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+.pill.off{color:var(--off);border-color:color-mix(in srgb,var(--off) 35%,transparent)}
+.pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.hz{font-size:13px;color:var(--faint);margin-top:8px;font-variant-numeric:tabular-nums;min-height:19px}
+.retry{margin-top:12px;min-height:44px;padding:0 22px;border-radius:999px;border:0;background:var(--ink);color:var(--bg);font:inherit;font-weight:700;cursor:pointer}
+
+.pegs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;padding:10px;border-radius:24px;
+  background:var(--chip);border:1px solid var(--chipline);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.peg{position:relative;aspect-ratio:1;max-height:64px;border-radius:18px;border:1px solid transparent;background:none;color:var(--ink);font:inherit;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;transition:background .2s,color .2s,transform .15s}
+.peg:active{transform:scale(.94)}
+.peg b{font-size:20px;line-height:1}
+.peg small{font-size:11px;color:var(--dim);margin-top:3px}
+.peg.on{background:var(--ink);color:var(--bg)}.peg.on small{color:color-mix(in srgb,var(--bg) 70%,transparent)}
+.peg.tuned::after{content:"";position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.hint{color:var(--dim);font-size:13px;text-align:center;margin:12px 0 0}
+button:focus-visible{outline:2px solid var(--ok);outline-offset:3px}
 [hidden]{display:none!important}
-@media(prefers-reduced-motion:reduce){#needle{transition:none!important}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Guitar tuner</h1>
-  <p class="sub">Standard tuning · E A D G B E · A4 = 440 Hz</p>
+<canvas id="dust" aria-hidden="true"></canvas>
+<div class="app">
+  <header>
+    <div><h1>Tuner</h1><p class="sub">Standard · E A D G B E · 440 Hz</p></div>
+    <button class="switch" id="auto" role="switch" aria-checked="true">Auto<i></i></button>
+  </header>
 
-  <div class="gauge">
-    <svg viewBox="0 0 400 240" aria-hidden="true">
-      <defs>
-        <linearGradient id="arc" x1="0" x2="1">
-          <stop offset="0" stop-color="#ff7a59"/><stop offset=".42" stop-color="#e9c46a"/>
-          <stop offset=".5" stop-color="#5fe0b0"/><stop offset=".58" stop-color="#e9c46a"/>
-          <stop offset="1" stop-color="#ff7a59"/>
-        </linearGradient>
-      </defs>
-      <path d="M40 200 A160 160 0 0 1 360 200" fill="none" stroke="url(#arc)" stroke-width="10" stroke-linecap="round" opacity=".9"/>
-      <g id="ticks"></g>
-      <text x="40" y="232" fill="#bfa995" font-size="13" text-anchor="middle">−50</text>
-      <text x="200" y="22" fill="#bfa995" font-size="13" text-anchor="middle">0</text>
-      <text x="360" y="232" fill="#bfa995" font-size="13" text-anchor="middle">+50</text>
-      <g id="needle" style="transform-origin:200px 200px;transition:transform .12s ease-out">
-        <line x1="200" y1="200" x2="200" y2="52" stroke="#f3ead8" stroke-width="4" stroke-linecap="round"/>
-      </g>
-      <circle cx="200" cy="200" r="10" fill="#f3ead8"/>
-    </svg>
-  </div>
-  <div class="note"><b id="note">–</b><span id="freq">Pluck a string</span></div>
+  <main class="stage">
+    <div class="gauge idle" id="gauge">
+      <svg viewBox="0 0 400 228" aria-hidden="true">
+        <path class="track" d="M50 210 A150 150 0 0 1 350 210" fill="none" stroke-width="6" stroke-linecap="round"/>
+        <path class="zone" id="zone" fill="none" stroke-width="6"/>
+        <path id="dev" fill="none" stroke-width="6" stroke-linecap="round"/>
+        <g id="ticks"></g>
+        <text class="flatsharp" x="62" y="238" text-anchor="middle">♭</text>
+        <text class="flatsharp" x="338" y="238" text-anchor="middle">♯</text>
+        <g id="needle">
+          <line x1="200" y1="210" x2="200" y2="44" stroke-width="3.5" stroke-linecap="round"/>
+          <circle class="hub" cx="200" cy="210" r="8"/>
+        </g>
+      </svg>
+    </div>
 
-  <div class="status" id="status" aria-live="polite"></div>
+    <div class="readout" id="readout">
+      <div class="note" id="note">–</div>
+      <div class="cents" id="cents"></div>
+      <div><span class="pill" id="status" aria-live="polite">Starting the mic…</span></div>
+      <div class="hz" id="hz"></div>
+      <button class="retry" id="retry" hidden>Retry</button>
+    </div>
+  </main>
 
-  <div class="strings" id="strings"></div>
-
-  <div class="row">
-    <button class="ghost" id="auto" aria-pressed="true">Auto-detect: on</button>
-    <button class="main" id="retry" hidden>Retry</button>
-  </div>
-  <p class="hint">Auto mode picks the nearest string from what you play. Tap a string to lock onto it instead (handy when a string is far out of tune). Install it from your browser’s Share menu (“Add to Home Screen”) to use it offline.</p>
+  <nav class="pegs" id="strings" aria-label="Strings"></nav>
+  <p class="hint">Tap a string to lock it · tap it again for auto</p>
 </div>
 
 <script>
 {
 const STR=[{n:'E',o:2,f:82.41},{n:'A',o:2,f:110.00},{n:'D',o:3,f:146.83},{n:'G',o:3,f:196.00},{n:'B',o:3,f:246.94},{n:'E',o:4,f:329.63}];
 const $=id=>document.getElementById(id);
-const strEl=$('strings'),needle=$('needle'),noteEl=$('note'),freqEl=$('freq'),statusEl=$('status'),retryBtn=$('retry'),autoBtn=$('auto');
+const strEl=$('strings'),needle=$('needle'),dev=$('dev'),gauge=$('gauge'),readout=$('readout'),noteEl=$('note'),centsEl=$('cents'),
+      hzEl=$('hz'),statusEl=$('status'),retryBtn=$('retry'),autoBtn=$('auto');
 let ctx=null,stream=null,worker=null,wake=null,running=false,starting=false,gen=0;
-let auto=true,cur=-1,cand=-1,candN=0,tuned=new Set(),dispC=null,lastMsg=0,lastHeard=0,idleShown=true;
+let auto=true,cur=-1,cand=-1,candN=0,tuned=new Set(),dispC=null,lastMsg=0,lastHeard=0,idleShown=true,tuneState='idle';
+const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)');
 
-$('ticks').innerHTML=Array.from({length:11},(_,i)=>{const a=(-90+i*18)*Math.PI/180,r1=i%5?150:144,r2=168;
-  return `<line x1="${200+r1*Math.sin(a)}" y1="${200-r1*Math.cos(a)}" x2="${200+r2*Math.sin(a)}" y2="${200-r2*Math.cos(a)}" stroke="#bfa995" stroke-width="${i%5?1.5:2.5}"/>`}).join('');
+// ---------- gauge geometry: ±50 cents across a 180° arc ----------
+const CX=200,CY=210,R=150;
+const pt=(deg,r)=>{const a=(deg-90)*Math.PI/180;return [CX+r*Math.cos(a),CY+r*Math.sin(a)]};
+const arc=(d0,d1,r)=>{const [x0,y0]=pt(d0,r),[x1,y1]=pt(d1,r);return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 0 ${d1>d0?1:0} ${x1.toFixed(2)} ${y1.toFixed(2)}`};
+$('ticks').innerHTML=Array.from({length:41},(_,i)=>{const c=-50+i*2.5,deg=c*1.8,major=i%4===0,zero=c===0;
+  const [x0,y0]=pt(deg,R+12),[x1,y1]=pt(deg,R+(zero?34:major?26:19));
+  return `<line class="tick${major?' major':''}${zero?' zero':''}" x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke-width="${zero?3.5:major?2.5:1.6}"/>`}).join('');
+$('zone').setAttribute('d',arc(-9,9,R));
 
+// Needle + deviation arc follow the reading with a spring, on the display's own frame clock.
+let shown=0,vel=0,target=0,anim=0,lastT=0;
+function draw(c){const deg=Math.max(-50,Math.min(50,c))*1.8;
+  needle.style.transform=`rotate(${deg}deg)`;needle.style.transformOrigin=`${CX}px ${CY}px`;
+  dev.setAttribute('d',Math.abs(deg)<0.4?'':arc(0,deg,R))}
+function tick(t){const dt=Math.min(.05,(t-lastT)/1000||.016);lastT=t;
+  const k=170,damp=2*Math.sqrt(k)*.82;vel+=(k*(target-shown)-damp*vel)*dt;shown+=vel*dt;draw(shown);
+  anim=Math.abs(target-shown)>.05||Math.abs(vel)>.05?requestAnimationFrame(tick):0}
+function setTarget(c){target=c;if(reduceMotion.matches){shown=c;vel=0;draw(c);return}if(!anim){lastT=performance.now();anim=requestAnimationFrame(tick)}}
+
+// ---------- strings ----------
 let lastKey='';
 function renderStrings(force){const k=cur+'|'+auto+'|'+[...tuned].join(',');if(!force&&k===lastKey)return;lastKey=k;
-  strEl.innerHTML=STR.map((s,i)=>`<button class="s${i===cur?' on':''}${tuned.has(i)?' tuned':''}" data-i="${i}" aria-label="String ${6-i}, ${s.n}${s.o}">${s.n}<small>${6-i} · ${s.n}${s.o}</small></button>`).join('')}
-strEl.addEventListener('click',e=>{const b=e.target.closest('.s');if(!b)return;
-  const i=+b.dataset.i;if(!auto&&cur===i){setAuto(true);return}cur=i;dispC=null;setAuto(false)});
-function setAuto(v){auto=v;autoBtn.setAttribute('aria-pressed',v);autoBtn.textContent='Auto-detect: '+(v?'on':'off');renderStrings()}
+  strEl.innerHTML=STR.map((s,i)=>`<button class="peg${i===cur?' on':''}${tuned.has(i)?' tuned':''}" data-i="${i}" aria-pressed="${i===cur&&!auto}" aria-label="String ${6-i}, ${s.n}${s.o}${tuned.has(i)?', tuned':''}"><b>${s.n}</b><small>${6-i}</small></button>`).join('')}
+strEl.addEventListener('click',e=>{const b=e.target.closest('.peg');if(!b)return;
+  const i=+b.dataset.i;if(!auto&&cur===i){setAuto(true);return}cur=i;dispC=null;setAuto(false);showNote()});
+function setAuto(v){auto=v;autoBtn.setAttribute('aria-checked',v);renderStrings()}
 autoBtn.addEventListener('click',()=>setAuto(!auto));
+function showNote(){const s=STR[cur];noteEl.innerHTML=s?`${s.n}<sub>${s.o}</sub>`:'–'}
 
+// ---------- visuals: rising dust, drawn off the main thread when possible ----------
+const dustEl=$('dust');let fx=null,fxQueue=[];
+function fxCall(t,...a){if(!fx){fxQueue.push([t,a]);if(fxQueue.length>20)fxQueue.shift();return}
+  if(fx instanceof Worker)fx.postMessage({t,a});else fx[t]?.(...a)}
+function dustColors(){const cs=getComputedStyle(document.documentElement),v=n=>cs.getPropertyValue(n).trim();
+  return {mode:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light',a:v('--dust-a'),b:v('--dust-b'),ok:v('--dust-ok')}}
+function dustSize(){return [innerWidth,innerHeight,Math.min(2,devicePixelRatio||1)]}
+function initFx(){
+  const [w,h,dpr]=dustSize(),colors=dustColors(),reduced=reduceMotion.matches;
+  const ready=f=>{fx=f;for(const [t,a] of fxQueue.splice(0))fxCall(t,...a)};
+  try{if(dustEl.transferControlToOffscreen&&window.Worker){
+    const off=dustEl.transferControlToOffscreen(),wk=new Worker('fx.js');
+    wk.postMessage({t:'init',canvas:off,w,h,dpr,colors,reduced},[off]);window.__fxMode='worker';ready(wk);return}}catch{}
+  const s=document.createElement('script');s.src='fx.js';
+  s.onload=()=>{const f=window.createDust(dustEl);f.theme(colors);f.resize(w,h,dpr);f.reduced(reduced);f.start();window.__fxMode='main';ready(f)};
+  document.head.appendChild(s)}
+addEventListener('resize',()=>fxCall('resize',...dustSize()));
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>fxCall('theme',dustColors()));
+reduceMotion.addEventListener('change',()=>{fxCall('reduced',reduceMotion.matches);if(!reduceMotion.matches)fxCall('start')});
+function setTune(s){if(s!==tuneState){tuneState=s;fxCall('tune',s)}}
+
+// ---------- readings ----------
 const cents=(f,ref)=>1200*Math.log2(f/ref);
 function nearest(f){let bi=0,bd=1e9;STR.forEach((s,i)=>{const d=Math.abs(cents(f,s.f));if(d<bd){bd=d;bi=i}});return bi}
-function say(text,color){statusEl.textContent=text;statusEl.style.color=color||'var(--dim)'}
+function say(text,cls){statusEl.textContent=text;statusEl.className='pill'+(cls?' '+cls:'')}
 
 function idle(){ // no trusted reading: never leave an old value on screen
-  idleShown=true;dispC=null;needle.style.transform='rotate(0deg)';needle.style.opacity='.3';
-  noteEl.style.color='var(--dim)';freqEl.textContent='Pluck a string';say('Listening…')}
-function fail(msg){ // something broke: say what, offer Retry
-  teardown();idle();noteEl.textContent='–';freqEl.textContent='';say(msg,'var(--off)');retryBtn.hidden=false}
+  idleShown=true;dispC=null;setTarget(0);gauge.classList.add('idle');readout.classList.remove('ok');
+  noteEl.style.color='';centsEl.textContent='';hzEl.textContent='';say('Listening…');setTune('idle')}
+function fail(msg){teardown();idle();noteEl.textContent='–';say(msg,'off');retryBtn.hidden=false}
 
-// One trusted pitch from the worker. Only drawing happens here.
 function onPitch(f){
   lastHeard=performance.now();
   if(auto){const n=nearest(f);
@@ -127,16 +210,18 @@ function onPitch(f){
       if(candN>=4){cur=n;candN=0;dispC=null}else return} // undecided: hold, never measure against the wrong string
     else candN=0}
   if(cur<0)return;
-  idleShown=false;needle.style.opacity='1';
+  idleShown=false;gauge.classList.remove('idle');
   const s=STR[cur];let c=cents(f,s.f);
   dispC=dispC==null?c:dispC+(c-dispC)*0.35;c=dispC;
-  needle.style.transform=`rotate(${Math.max(-50,Math.min(50,c))*1.8}deg)`;
-  noteEl.textContent=s.n;
-  freqEl.textContent=`${f.toFixed(1)} Hz · target ${s.f.toFixed(2)} Hz · ${c>=0?'+':''}${c.toFixed(0)} ¢`;
-  const ok=Math.abs(c)<=5;
-  noteEl.style.color=ok?'var(--ok)':Math.abs(c)<=15?'#e9c46a':'var(--off)';
-  if(ok){say('In tune ✓','var(--ok)');tuned.add(cur)}
-  else say(c<0?`Too low — tighten (${Math.abs(c).toFixed(0)} ¢ flat)`:`Too high — loosen (${c.toFixed(0)} ¢ sharp)`,'var(--off)');
+  setTarget(c);showNote();
+  const a=Math.abs(c),ok=a<=5;
+  centsEl.textContent=(c>=0?'+':'−')+Math.abs(c).toFixed(0)+' ¢';
+  centsEl.style.color=ok?'var(--ok)':a<=15?'var(--warn)':'var(--off)';
+  dev.style.stroke=ok?'var(--ok)':a<=15?'var(--warn)':'var(--off)';
+  hzEl.textContent=`${f.toFixed(1)} Hz · target ${s.f.toFixed(2)} Hz`;
+  if(ok){if(!readout.classList.contains('ok')){readout.classList.remove('ok');void readout.offsetWidth;readout.classList.add('ok')}
+    say('In tune','ok');setTune('ok');if(!tuned.has(cur)){tuned.add(cur);fxCall('celebrate')}}
+  else{readout.classList.remove('ok');say(c<0?'Tighten ↑':'Loosen ↓',a<=15?'warn':'off');setTune('off')}
   renderStrings();
 }
 
@@ -144,11 +229,12 @@ function onPitch(f){
 setInterval(()=>{
   if(!running)return;const now=performance.now();
   if(ctx&&ctx.state==='suspended'){lastMsg=now;say('Tap anywhere to start listening');return}
-  if(now-lastMsg>1000){fail('The mic stopped sending sound.');return}
+  if(now-lastMsg>1000){fail('The mic stopped sending sound');return}
   if(!idleShown&&now-lastHeard>1500)idle();
-  else if(!idleShown&&now-lastHeard>500)needle.style.opacity='.3'; // dim while unsure
+  else if(!idleShown&&now-lastHeard>500)gauge.classList.add('idle'); // dim while unsure
 },250);
 
+// ---------- audio: AudioWorklet (audio thread) → Worker (detection) → this thread (drawing only) ----------
 async function start(){
   if(starting||running)return;starting=true;const my=++gen;
   retryBtn.hidden=true;say('Starting the mic…');
@@ -162,25 +248,24 @@ async function start(){
       navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}),
       ctx.audioWorklet.addModule('tuner-worklet.js')]);
     if(my!==gen){s.getTracks().forEach(t=>t.stop());return}
-    stream=s;stream.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>running&&fail('The mic was turned off.')));
+    stream=s;stream.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>running&&fail('The mic was turned off')));
     const src=ctx.createMediaStreamSource(stream);
     const hp=new BiquadFilterNode(ctx,{type:'highpass',frequency:60});
     const hop=Math.round(ctx.sampleRate/60);
     const tap=new AudioWorkletNode(ctx,'tuner-tap',{numberOfInputs:1,numberOfOutputs:1,channelCount:1,channelCountMode:'explicit',processorOptions:{hop}});
     const mute=new GainNode(ctx,{gain:0});
     src.connect(hp).connect(tap).connect(mute).connect(ctx.destination); // silent output keeps the graph running
-    // Audio thread → worker directly; the UI thread only receives results.
     const ch=new MessageChannel();
     tap.port.postMessage({port:ch.port1},[ch.port1]);
     worker.postMessage({t:'init',sr:ctx.sampleRate,port:ch.port2},[ch.port2]);
-    worker.onmessage=e=>{lastMsg=performance.now();if(e.data.t==='pitch')onPitch(e.data.f)};
+    worker.onmessage=e=>{const m=e.data;lastMsg=performance.now();fxCall('level',m.r,m.a);if(m.t==='pitch')onPitch(m.f)};
     lastMsg=performance.now();running=true;idle();
     ctx.onstatechange=()=>{if(running&&ctx&&ctx.state==='running')idle()};
     if(ctx.state!=='running'){say('Tap anywhere to start listening');ctx.resume().catch(()=>{})} // Safari lets an active mic start audio without a tap
     try{wake=await navigator.wakeLock?.request('screen')}catch{} // keep the screen on while tuning
   }catch(e){
-    const m=e&&e.name==='NotAllowedError'?'Mic access was blocked. Allow it in your browser settings, then Retry.'
-      :e&&e.name==='NotFoundError'?'No microphone found.':'Could not start the mic: '+(e&&e.message||e);
+    const m=e&&e.name==='NotAllowedError'?'Mic access is blocked — allow it in settings, then Retry'
+      :e&&e.name==='NotFoundError'?'No microphone found':'Could not start the mic: '+(e&&e.message||e);
     fail(m);
   }finally{starting=false}
 }
@@ -191,10 +276,11 @@ function teardown(){
 // Browsers may hold audio until the first tap; any tap on the page resumes it.
 document.addEventListener('pointerdown',()=>{if(ctx&&ctx.state==='suspended')ctx.resume().then(()=>running&&idle()).catch(()=>{})});
 retryBtn.addEventListener('click',()=>{teardown();start()});
-// Release the mic in the background; pick it up again on return.
+// Release the mic and pause the dust in the background; pick both up again on return.
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='hidden'){if(running||starting)teardown()}
-  else if(!running&&!starting&&retryBtn.hidden)start()});
+  if(document.visibilityState==='hidden'){fxCall('pause');if(running||starting)teardown()}
+  else{fxCall('start');if(!running&&!starting&&retryBtn.hidden)start()}});
+
 if('serviceWorker' in navigator&&isSecureContext){
   // Updates: check whenever the app comes to the foreground (iOS resumes home-screen apps instead
   // of reloading them), and reload once when a new version takes over.
@@ -204,8 +290,7 @@ if('serviceWorker' in navigator&&isSecureContext){
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')reg.update().catch(()=>{})});
   }).catch(()=>{});
 }
-renderStrings(true);
-start();
+renderStrings(true);draw(0);initFx();start();
 }
 </script>
 </body>

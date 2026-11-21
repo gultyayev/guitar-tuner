@@ -4,8 +4,8 @@
 // 10-minute max-age can't serve a stale copy), falling back to the offline cache
 // when the network is down or takes longer than 3 s. Fonts are cache-first.
 // Bump VERSION on every release: the old cache is dropped and open pages reload.
-const VERSION = 'tuner-v5';
-const CORE = ['./', './index.html', './manifest.webmanifest', './tuner-worker.js', './tuner-worklet.js',
+const VERSION = 'tuner-v6';
+const CORE = ['./', './index.html', './manifest.webmanifest', './tuner-worker.js', './tuner-worklet.js', './fx.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon.svg'];
 const FONTS = /^https:\/\/fonts\.(googleapis|gstatic)\.com\//;
 
